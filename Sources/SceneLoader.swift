@@ -115,22 +115,43 @@ enum SceneLoader {
             let ic = Int(try r.u32())
             let flags = try r.u32()
 
-            let vbytes = vc * 20
+            // flags == 0: vértice de 20 bytes (pos + uv).
+            // flags != 0: vértice de 52 bytes intercalado (20 + 32 de animação).
+            let vstride = flags != 0 ? 52 : 20
             let ibytes = ic * 4
-            guard r.offset + vbytes + ibytes <= data.count else { throw SceneError.truncated }
+            guard r.offset + vc * vstride + ibytes <= data.count else { throw SceneError.truncated }
 
-            let vb: MTLBuffer? = data.withUnsafeBytes { raw in
-                device.makeBuffer(bytes: raw.baseAddress!.advanced(by: r.offset),
-                                  length: vbytes, options: .storageModeShared)
+            let vb: MTLBuffer? = data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) -> MTLBuffer? in
+                let src = raw.baseAddress!.advanced(by: r.offset)
+                if vstride == 20 {
+                    return device.makeBuffer(bytes: src, length: vc * 20, options: .storageModeShared)
+                }
+                guard let buf = device.makeBuffer(length: vc * 20, options: .storageModeShared) else { return nil }
+                let dst = buf.contents()
+                for i in 0..<vc {
+                    memcpy(dst + i * 20, src + i * vstride, 20)
+                }
+                return buf
             }
-            let ib: MTLBuffer? = data.withUnsafeBytes { raw in
-                device.makeBuffer(bytes: raw.baseAddress!.advanced(by: r.offset + vbytes),
-                                  length: ibytes, options: .storageModeShared)
+            let ib: MTLBuffer? = data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) -> MTLBuffer? in
+                return device.makeBuffer(bytes: raw.baseAddress!.advanced(by: r.offset + vc * vstride),
+                                         length: ibytes, options: .storageModeShared)
             }
             guard let vbuf = vb, let ibuf = ib else { throw SceneError.truncated }
-            try r.skip(vbytes + ibytes)
-            if flags != 0 { try r.skip(vc * 32) }
-            scene.meshes.append(MeshGPU(vertexBuffer: vbuf, indexBuffer: ibuf, indexCount: ic, material: material))
+
+            // Proteção: índice fora do intervalo derruba a GPU. Nesse caso a malha não é desenhada.
+            let indicesOK: Bool = data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) -> Bool in
+                let base = r.offset + vc * vstride
+                for i in 0..<ic {
+                    let idx = raw.loadUnaligned(fromByteOffset: base + i * 4, as: UInt32.self)
+                    if Int(idx) >= vc { return false }
+                }
+                return true
+            }
+
+            try r.skip(vc * vstride + ibytes)
+            scene.meshes.append(MeshGPU(vertexBuffer: vbuf, indexBuffer: ibuf,
+                                        indexCount: indicesOK ? ic : 0, material: material))
         }
 
         let matCount = Int(try r.u32())
