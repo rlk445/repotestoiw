@@ -6,6 +6,13 @@ struct HUDBar: View {
 
     var body: some View {
         VStack(spacing: 10) {
+            Text(model.renderInfo)
+                .font(.caption2)
+                .foregroundColor(.yellow)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.black.opacity(0.6))
+                .clipShape(Capsule())
             Text(tracker.status)
                 .font(.footnote)
                 .foregroundColor(.white)
