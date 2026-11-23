@@ -10,6 +10,7 @@ final class AppModel: ObservableObject {
         didSet { motion.enabled = gyroEnabled }
     }
     @Published var showCamera = true
+    @Published var renderInfo = "renderer: iniciando…"
     private var started = false
 
     func start() {
