@@ -47,10 +47,22 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var pinchWas: [String: Bool] = [:]
     private var pinchPrev: [String: SIMD2<Float>] = [:]
 
+    static var lastError = ""
+    var summary: String {
+        let ok = textures.filter { $0 != nil }.count
+        return "cena ok: \(scene.draws.count) draws, \(ok)/\(textures.count) texturas"
+    }
+
     init?(view: MTKView, model: AppModel) {
         guard let dev = view.device ?? MTLCreateSystemDefaultDevice(),
-              let q = dev.makeCommandQueue(),
-              let library = dev.makeDefaultLibrary() else { return nil }
+              let q = dev.makeCommandQueue() else {
+            Renderer.lastError = "sem GPU Metal"
+            return nil
+        }
+        guard let library = dev.makeDefaultLibrary() else {
+            Renderer.lastError = "shaders nao encontrados"
+            return nil
+        }
         view.device = dev
         view.colorPixelFormat = .bgra8Unorm
         view.depthStencilPixelFormat = .depth32Float
@@ -58,7 +70,13 @@ final class Renderer: NSObject, MTKViewDelegate {
         view.clearColor = MTLClearColor(red: 0.62, green: 0.74, blue: 0.9, alpha: 1)
         view.preferredFramesPerSecond = 60
 
-        guard let loaded = try? SceneLoader.load(device: dev, name: "desert") else { return nil }
+        let loaded: LoadedScene
+        do {
+            loaded = try SceneLoader.load(device: dev, name: "desert")
+        } catch {
+            Renderer.lastError = "scene.bin: \(error)"
+            return nil
+        }
 
         // vertex: pos float3 + uv float2 = 20 bytes
         let vd = MTLVertexDescriptor()
@@ -78,7 +96,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         sd.rasterSampleCount = view.sampleCount
         sd.colorAttachments[0].pixelFormat = view.colorPixelFormat
         sd.depthAttachmentPixelFormat = view.depthStencilPixelFormat
-        guard let sceneState = try? dev.makeRenderPipelineState(descriptor: sd) else { return nil }
+        let sceneState: MTLRenderPipelineState
+        do { sceneState = try dev.makeRenderPipelineState(descriptor: sd) } catch {
+            Renderer.lastError = "pipeline cena: \(error.localizedDescription)"
+            return nil
+        }
 
         let hd = MTLRenderPipelineDescriptor()
         hd.vertexFunction = library.makeFunction(name: "hand_vertex")
@@ -94,7 +116,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         ca.destinationRGBBlendFactor = .oneMinusSourceAlpha
         ca.sourceAlphaBlendFactor = .one
         ca.destinationAlphaBlendFactor = .oneMinusSourceAlpha
-        guard let handState = try? dev.makeRenderPipelineState(descriptor: hd) else { return nil }
+        let handState: MTLRenderPipelineState
+        do { handState = try dev.makeRenderPipelineState(descriptor: hd) } catch {
+            Renderer.lastError = "pipeline maos: \(error.localizedDescription)"
+            return nil
+        }
 
         let d1 = MTLDepthStencilDescriptor()
         d1.depthCompareFunction = .less
@@ -316,6 +342,11 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         enc.endEncoding()
         cb.present(drawable)
+        cb.addCompletedHandler { [weak self] c in
+            if let e = c.error {
+                DispatchQueue.main.async { self?.model.renderInfo = "GPU erro: \(e.localizedDescription)" }
+            }
+        }
         cb.commit()
     }
 }
