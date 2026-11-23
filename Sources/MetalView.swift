@@ -24,6 +24,9 @@ struct MetalView: UIViewRepresentable {
             context.coordinator.renderer = r
             model.renderer = r
             view.delegate = r
+            DispatchQueue.main.async { model.renderInfo = r.summary }
+        } else {
+            DispatchQueue.main.async { model.renderInfo = "ERRO renderer: " + Renderer.lastError }
         }
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pan(_:)))
         view.addGestureRecognizer(pan)
